@@ -38,6 +38,13 @@
 #include <string>
 #include <map>
 #include <vector>
+#ifdef _WIN32
+typedef int pid_t;
+#include <thread>
+#include <chrono>
+#define usleep(ms) std::this_thread::sleep_for(std::chrono::milliseconds(ms))
+#define write(fd, buf, size)
+#else
 #include <sys/types.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -45,6 +52,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#endif
 #include <fstream>
 
 #include <cuda.h>
@@ -334,6 +342,9 @@ template<class T> void startBurn(int index, int writeFd, T *A, T *B, bool double
 }
 
 int pollTemp(pid_t *p) {
+#if WIN32
+	return 0;
+#else
 	int tempPipe[2];
 	pipe(tempPipe);
 	
@@ -352,9 +363,11 @@ int pollTemp(pid_t *p) {
 	close(tempPipe[1]);
 
 	return tempPipe[0];
+#endif
 }
 
 void updateTemps(int handle, std::vector<int> *temps) {
+#ifndef WIN32
 	const int readSize = 10240;
 	static int gpuIter = 0;
 	char data[readSize+1];
@@ -374,9 +387,11 @@ void updateTemps(int handle, std::vector<int> *temps) {
 		gpuIter = (gpuIter+1)%(temps->size());
 	} else if (!strcmp(data, "        Gpu                     : N/A"))
 		gpuIter = (gpuIter+1)%(temps->size()); // We rotate the iterator for N/A values as well
+#endif
 }
 
 void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int runTime) {
+#ifndef WIN32
 	fd_set waitHandles;
 	
 	pid_t tempPid;
@@ -531,6 +546,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 	printf("\nTested %d GPUs:\n", (int)clientPid.size());
 	for (size_t i = 0; i < clientPid.size(); ++i)
 		printf("\tGPU %d: %s\n", (int)i, clientFaulty.at(i) ? "FAULTY" : "OK");
+#endif
 }
 
 template<class T> void launch(int runLength, bool useDoubles) {
@@ -545,6 +561,18 @@ template<class T> void launch(int runLength, bool useDoubles) {
 		B[i] = (T)((double)(rand()%1000000)/100000.0);
 	}
 
+#if WIN32
+	int devCount = initCuda();
+	std::vector<std::thread> threads;
+	for (int i = 0; i < devCount; ++i) {
+		threads.emplace_back([=]() {
+			startBurn<T>(i, 0, A, B, useDoubles);
+		});
+	}
+	for (std::thread& thread : threads) {
+		thread.join();
+	}
+#else
 	// Forking a process..  This one checks the number of devices to use,
 	// returns the value, and continues to use the first one.
 	int mainPipe[2];
@@ -604,6 +632,7 @@ template<class T> void launch(int runLength, bool useDoubles) {
 
 	for (size_t i = 0; i < clientPipes.size(); ++i)
 		close(clientPipes.at(i));
+#endif
 
 	free(A);
 	free(B);
