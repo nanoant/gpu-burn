@@ -115,13 +115,6 @@ void checkError(cublasStatus_t rCode, std::string desc = "") {
 			g_errorStrings[rCode];
 }
 
-double getTime()
-{
-	struct timeval t;
-	gettimeofday(&t, NULL);
-	return (double)t.tv_sec + (double)t.tv_usec / 1e6;
-}
-
 template <class T> class GPU_Test {
 	public:
 	GPU_Test(int dev, bool doubles) : d_devNumber(dev), d_doubles(doubles) {
